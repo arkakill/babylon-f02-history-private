@@ -54,7 +54,7 @@ jobs:
           go-version-file: tested/go.mod
           cache: true
           cache-dependency-path: tested/go.sum
-      - name: Record exact revisions and copy the unchanged test
+      - name: Record exact revisions and copy the F-02 test
         shell: bash
         run: |
           set -euo pipefail
@@ -74,17 +74,60 @@ jobs:
           printf '%s\n' "$target_module" > audit-results/module-path.txt
           test_file=tested/x/finality/keeper/f02_late_quorum_audit_test.go
           if [[ "$target_module" != github.com/babylonlabs-io/babylon/v4 ]]; then
-            TARGET_MODULE="$target_module" python3 - "$test_file" <<'PY'
+            TARGET_MODULE="$target_module" CASE_ID='${{ matrix.case_id }}' python3 - "$test_file" <<'PY'
           from pathlib import Path
           import os, sys
+
           path = Path(sys.argv[1])
           text = path.read_text()
-          text = text.replace('github.com/babylonlabs-io/babylon/v4', os.environ['TARGET_MODULE'])
+          changes = []
+
+          def replace_once(old, new, description):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match for {description}; found {count}")
+              text = text.replace(old, new, 1)
+              changes.append(description)
+
+          module_prefix = 'github.com/babylonlabs-io/babylon/v4'
+          module_count = text.count(module_prefix)
+          if module_count == 0:
+              raise SystemExit('Expected at least one Babylon v4 import path to adapt')
+          text = text.replace(module_prefix, os.environ['TARGET_MODULE'])
+          changes.append(f'adapt module import path ({module_count} references)')
+          replace_once('\tftypes "github.com/babylonlabs-io/babylon/x/finality/types"\n', '', 'drop absent legacy finality-hooks mock import')
+          replace_once('h := testutil.NewHelper(t, btclcKeeper, btccKeeper, nil)', 'h := testutil.NewHelper(t, btclcKeeper, btccKeeper)', 'adapt legacy NewHelper signature')
+          hooks = (
+              '\thooks := h.FinalityHooks.(*ftypes.MockFinalityHooks)\n'
+              '\thooks.EXPECT().AfterBtcDelegationActivated(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()\n'
+              '\thooks.EXPECT().AfterBtcDelegationUnbonded(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()\n'
+              '\thooks.EXPECT().AfterBbnFpEntersActiveSet(gomock.Any(), gomock.Any()).AnyTimes()\n'
+              '\thooks.EXPECT().AfterBbnFpRemovedFromActiveSet(gomock.Any(), gomock.Any()).AnyTimes()\n'
+          )
+          replace_once(hooks, '', 'remove hooks mock expectations absent from the legacy helper')
+          replace_once('\th             *testutil.Helper\n', '\th             *testutil.Helper\n\tmsgCreate     *btcstktypes.MsgCreateBTCDelegation\n', 'retain the original create message for the legacy covenant helper')
+          if os.environ['CASE_ID'].startswith('pr631-'):
+              replace_once('\t\tfpPK,\n', '\t\t[]*btcec.PublicKey{fpPK},\n', 'adapt PR #631 helper to its multi-provider argument')
+          replace_once('stakingTxHash, _, del, _, _, _, err := h.CreateDelegationWithBtcBlockHeight(', 'stakingTxHash, msgCreate, del, _, _, _, err := h.CreateDelegationWithBtcBlockHeight(', 'retain helper-returned create message')
+          replace_once('\t\tr:             r,\n', '\t\tr:             r,\n\t\tmsgCreate:     msgCreate,\n', 'store create message in fixture')
+          replace_once(
+              '\tdel := f.storedDelegation(t)\n\tstatus, err := f.h.BTCStakingKeeper.BtcDelStatus(f.h.Ctx, del, f.quorum, btcHeight)\n\trequire.NoError(t, err)\n\treturn status',
+              '\tdel := f.storedDelegation(t)\n\treturn del.GetStatus(btcHeight, f.quorum)',
+              'use the legacy delegation status method',
+          )
+          replace_once('f.h.GenerateCovenantSignaturesMessages(f.r, f.covenantSKs, del)', 'f.h.GenerateCovenantSignaturesMessages(f.r, f.covenantSKs, f.msgCreate, del)', 'pass the create message required by the legacy covenant helper')
           path.write_text(text)
+          Path('audit-results/test-adaptation.txt').write_text(
+              'Legacy-harness-only adaptations; the control/target scenarios, block sequence, event assertions, state assertions, cache/table checks, and final security invariant are unchanged.\n'
+              + ''.join(f'- {item}\n' for item in changes)
+          )
           PY
-            printf '%s\n' 'Only module import prefixes were adapted; test logic and assertions are unchanged.' > audit-results/test-adaptation.txt
+            if [[ '${{ matrix.case_id }}' == pr631-* ]]; then
+              printf '%s\n' '- PR #631 helper signature accepts a provider slice; the backport and newer helpers accept one provider key.' >> audit-results/test-adaptation.txt
+            fi
           else
-            printf '%s\n' 'No source adaptation required.' > audit-results/test-adaptation.txt
+            printf '%s\n' 'No source adaptation required; this v4 test harness already matches the audit source.' > audit-results/test-adaptation.txt
           fi
           sha256sum "$test_file" | awk '{print $1}' > audit-results/test-adapted.sha256
           diff -u audit-source/x/finality/keeper/f02_late_quorum_audit_test.go "$test_file" > audit-results/test-adaptation.diff || true
