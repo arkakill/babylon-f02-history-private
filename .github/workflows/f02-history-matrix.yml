@@ -1,10 +1,17 @@
 name: F-02 historical revision matrix
+
 on:
   push:
     branches:
       - audit/f02-history-reconstruction
+
 permissions:
   contents: read
+
+concurrency:
+  group: f02-history-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   f02-history:
     name: '${{ matrix.case_id }} — ${{ matrix.sha }}'
@@ -30,31 +37,31 @@ jobs:
           - case_id: v4.5.0
             reference: https://github.com/babylonlabs-io/babylon/releases/tag/v4.5.0
             sha: f9006e4232dece8050b08556c4617bc0aaa07128
-          - case_id: upstream-main-c2f731f
+          - case_id: upstream-main-current-main-2026-10-10
             reference: https://github.com/babylonlabs-io/babylon/commit/c2f731f4531b2b22afe5047f152e108b944bf811
             sha: c2f731f4531b2b22afe5047f152e108b944bf811
     steps:
-      - name: Checkout the audit test source
+      - name: Checkout private audit test source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: arkakill/babylon
+          repository: ${{ github.repository }}
           ref: ${{ github.sha }}
           path: audit-source
           fetch-depth: 1
-      - name: Checkout the exact historical revision
+      - name: Checkout exact upstream historical revision
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: arkakill/babylon
+          repository: babylonlabs-io/babylon
           ref: ${{ matrix.sha }}
           path: tested
           fetch-depth: 1
-      - name: Use Go version declared by the tested revision
+      - name: Use Go version declared by tested revision
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: tested/go.mod
           cache: true
           cache-dependency-path: tested/go.sum
-      - name: Record exact revisions and copy the F-02 test
+      - name: Record revisions and adapt only historical test harness calls
         shell: bash
         run: |
           set -euo pipefail
@@ -119,37 +126,46 @@ jobs:
           replace_once('f.h.GenerateCovenantSignaturesMessages(f.r, f.covenantSKs, del)', 'f.h.GenerateCovenantSignaturesMessages(f.r, f.covenantSKs, f.msgCreate, del)', 'pass the create message required by the legacy covenant helper')
           path.write_text(text)
           Path('audit-results/test-adaptation.txt').write_text(
-              'Legacy-harness-only adaptations; the control/target scenarios, block sequence, event assertions, state assertions, cache/table checks, and final security invariant are unchanged.\n'
+              'Legacy-harness-only adaptations; scenario sequence, state/event assertions, cache/table checks, and final invariant are unchanged.\n'
               + ''.join(f'- {item}\n' for item in changes)
           )
           PY
             if [[ '${{ matrix.case_id }}' == pr631-* ]]; then
-              printf '%s\n' '- PR #631 helper signature accepts a provider slice; the backport and newer helpers accept one provider key.' >> audit-results/test-adaptation.txt
+              printf '%s\n' '- PR #631 helper accepts a provider slice; backport/newer helpers accept a single provider key.' >> audit-results/test-adaptation.txt
             fi
           else
-            printf '%s\n' 'No source adaptation required; this v4 test harness already matches the audit source.' > audit-results/test-adaptation.txt
+            printf '%s\n' 'No source adaptation required; the v4 harness matches the audit source.' > audit-results/test-adaptation.txt
           fi
           sha256sum "$test_file" | awk '{print $1}' > audit-results/test-adapted.sha256
           diff -u audit-source/x/finality/keeper/f02_late_quorum_audit_test.go "$test_file" > audit-results/test-adaptation.diff || true
           git -C tested status --short > audit-results/test-only-working-tree.txt
-          cat > audit-results/control-command.txt <<'EOF'
-          go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper
-          EOF
-          cat > audit-results/target-command.txt <<'EOF'
-          go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper
-          EOF
-      - name: Run control and target separately and preserve full logs
+          printf '%s\n' "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper" > audit-results/control-command.txt
+          printf '%s\n' "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper" > audit-results/target-command.txt
+      - name: Run control and target separately; preserve stdout, stderr and exit codes
+        if: always()
         shell: bash
         run: |
+          mkdir -p audit-results
           set +e
-          (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper) > audit-results/control.log 2>&1
-          control_rc=$?
-          (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper) > audit-results/target.log 2>&1
-          target_rc=$?
+          if [[ -d tested ]]; then
+            (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper) > audit-results/control.stdout.log 2> audit-results/control.stderr.log
+            control_rc=$?
+            (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper) > audit-results/target.stdout.log 2> audit-results/target.stderr.log
+            target_rc=$?
+          else
+            control_rc=125
+            target_rc=125
+            printf '%s\n' 'Historical checkout was unavailable; tests did not run.' > audit-results/control.stderr.log
+            printf '%s\n' 'Historical checkout was unavailable; tests did not run.' > audit-results/target.stderr.log
+            : > audit-results/control.stdout.log
+            : > audit-results/target.stdout.log
+          fi
           printf '%s\n' "$control_rc" > audit-results/control.exit-code
           printf '%s\n' "$target_rc" > audit-results/target.exit-code
-          if [[ $control_rc -eq 0 ]] && grep -Fq -- '--- PASS: TestF02ControlQuorumBeforeExpiry' audit-results/control.log; then control_result=PASS; else control_result=FAIL_OR_BLOCKED; fi
-          if grep -Fq 'expired delegation regained voting power' audit-results/target.log; then
+          { printf '%s\n' '--- STDOUT ---'; cat audit-results/control.stdout.log; printf '%s\n' '--- STDERR ---'; cat audit-results/control.stderr.log; } > audit-results/control.log
+          { printf '%s\n' '--- STDOUT ---'; cat audit-results/target.stdout.log; printf '%s\n' '--- STDERR ---'; cat audit-results/target.stderr.log; } > audit-results/target.log
+          if [[ $control_rc -eq 0 ]] && grep -Fq -- '--- PASS: TestF02ControlQuorumBeforeExpiry' audit-results/control.log; then control_result=PASS; else control_result=FAILED_OR_BLOCKED; fi
+          if grep -Fq 'expired delegation regained voting power' audit-results/target.log && grep -Fq 'after late quorum:' audit-results/target.log; then
             target_result=F02_REPRODUCED_AT_FINAL_INVARIANT
             final_assertion=REACHED_AND_FAILED
           elif [[ $target_rc -eq 0 ]] && grep -Fq -- '--- PASS: TestF02LateQuorumAfterExpiryHasNoVotingPower' audit-results/target.log; then
@@ -163,39 +179,229 @@ jobs:
           printf '%s\n' "$target_result" > audit-results/target-result.txt
           printf '%s\n' "$final_assertion" > audit-results/final-assertion.txt
           grep -E 'control before expiry|control after expiry|after EXPIRED event without quorum|after late quorum|Should be zero|expired delegation regained voting power|undefined:|FAIL|PASS' audit-results/control.log audit-results/target.log > audit-results/observed-state-lines.txt || true
-          cat audit-results/control.log
-          cat audit-results/target.log
-      - name: Summarize this historical revision
+      - name: Create structured per-revision result
         if: always()
         shell: bash
         run: |
-          mkdir -p audit-results
-          control_result=$(cat audit-results/control-result.txt 2>/dev/null || echo NOT_RUN)
-          target_result=$(cat audit-results/target-result.txt 2>/dev/null || echo NOT_RUN)
-          control_rc=$(cat audit-results/control.exit-code 2>/dev/null || echo not-run)
-          target_rc=$(cat audit-results/target.exit-code 2>/dev/null || echo not-run)
-          tested_sha=$(cat audit-results/tested-commit.sha 2>/dev/null || echo unavailable)
-          tested_parent=$(cat audit-results/tested-parent.sha 2>/dev/null || echo unavailable)
-          go_version=$(cat audit-results/go-version.txt 2>/dev/null || echo unavailable)
-          final_assertion=$(cat audit-results/final-assertion.txt 2>/dev/null || echo NOT_VERIFIED)
-          {
-            echo '## F-02 historical case'
-            echo
-            echo '- Case: ${{ matrix.case_id }}'
-            echo '- Historical reference: ${{ matrix.reference }}'
-            echo "- Tested SHA: $tested_sha"
-            echo "- Parent SHA(s): $tested_parent"
-            echo "- Go: $go_version"
-            echo "- Control: $control_result (exit $control_rc)"
-            echo "- Target: $target_result (exit $target_rc)"
-            echo "- Final assertion: $final_assertion"
-            echo '- Full logs, exact commands, hashes, state lines, and metadata are attached as an artifact.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Preserve logs and metadata
+          python3 - <<'PY'
+          import json, pathlib, re
+
+          d = pathlib.Path('audit-results')
+          def read(name, default='unavailable'):
+              p = d / name
+              return p.read_text(errors='replace').strip() if p.exists() else default
+          target_log = read('target.log', '')
+          control_log = read('control.log', '')
+          late = re.search(r'after late quorum: derived_state=([^ ]+).*?voting_power=(\d+).*?cache=(.*?) table=(.*)', target_log)
+          expired = re.search(r'after EXPIRED event without quorum: derived_state=([^ ]+).*?voting_power=(\d+)', target_log)
+          control_active = re.search(r'control before expiry: state=([^ ]+) BTC height=(\d+) stake_sats=(\d+) cache=(.*?) table=(.*)', control_log)
+          control = re.search(r'control after expiry: state=([^ ]+).*?voting_power=(\d+)', control_log)
+          power = int(late.group(2)) if late else None
+          result = {
+            'case_id': read('case.txt'),
+            'historical_reference': read('historical-reference.txt'),
+            'tested_sha': read('tested-commit.sha'),
+            'tested_parent_sha': read('tested-parent.sha'),
+            'audit_source_sha': read('audit-source-commit.sha'),
+            'test_source_sha256': read('test-source.sha256'),
+            'adapted_test_sha256': read('test-adapted.sha256'),
+            'go_version': read('go-version.txt'),
+            'go_environment': read('go-env.txt'),
+            'module_path': read('module-path.txt'),
+            'test_adaptation': read('test-adaptation.txt'),
+            'control': {'result': read('control-result.txt', 'NOT_RUN'), 'exit_code': read('control.exit-code', 'not-run'), 'command': read('control-command.txt')},
+            'f02_target': {'result': read('target-result.txt', 'NOT_RUN'), 'exit_code': read('target.exit-code', 'not-run'), 'command': read('target-command.txt'), 'final_assertion': read('final-assertion.txt', 'NOT_VERIFIED')},
+            'observed': {
+              'control_before_expiry_state': control_active.group(1) if control_active else None,
+              'control_before_expiry_btc_height': int(control_active.group(2)) if control_active else None,
+              'control_before_expiry_persisted_power_sats': int(control_active.group(3)) if control_active else None,
+              'control_before_expiry_cache': control_active.group(4) if control_active else None,
+              'control_before_expiry_power_table': control_active.group(5) if control_active else None,
+              'control_final_state': control.group(1) if control else None,
+              'control_persisted_power_sats': int(control.group(2)) if control else None,
+              'after_expiry_before_quorum_state': expired.group(1) if expired else None,
+              'after_expiry_before_quorum_power_sats': int(expired.group(2)) if expired else None,
+              'after_late_quorum_state': late.group(1) if late else None,
+              'after_late_quorum_persisted_power_sats': power,
+              'finality_cache': late.group(3) if late else None,
+              'finality_power_table': late.group(4) if late else None,
+              'expiry_event_no_quorum_assertion_seen': 'after EXPIRED event without quorum' in target_log,
+              'late_quorum_event_and_state_assertion_seen': 'after late quorum:' in target_log,
+              'final_invariant_failure_seen': 'expired delegation regained voting power' in target_log,
+            },
+            'evidence_type': 'keeper integration test; raw stdout/stderr and final assertions attached',
+          }
+          (d / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+          PY
+      - name: Summarize this revision
         if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          p=pathlib.Path('audit-results/result.json')
+          r=json.loads(p.read_text()) if p.exists() else {}
+          o=r.get('observed',{})
+          print('## Resultado F-02 por revisión\n')
+          print(f"- Caso: {r.get('case_id','unavailable')}")
+          print(f"- SHA: {r.get('tested_sha','unavailable')}")
+          print(f"- Control: {r.get('control',{}).get('result','NOT_RUN')} (código {r.get('control',{}).get('exit_code','not-run')})")
+          print(f"- F-02: {r.get('f02_target',{}).get('result','NOT_RUN')} (código {r.get('f02_target',{}).get('exit_code','not-run')})")
+          print(f"- Aserción final: {r.get('f02_target',{}).get('final_assertion','NOT_VERIFIED')}")
+          print(f"- Estado derivado tras quórum tardío: {o.get('after_late_quorum_state')}")
+          print(f"- Poder de voto persistido: {o.get('after_late_quorum_persisted_power_sats')} sats")
+          print('- Los logs completos, stdout, stderr, códigos de salida y el test adaptado están en el artefacto de este caso.')
+          PY
+      - name: Preserve full test evidence
+        if: always()
+        id: case-artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: f02-history-${{ matrix.case_id }}
           path: audit-results/
           if-no-files-found: warn
           retention-days: 90
+      - name: Mark runs that never reached the required assertions as inconclusive
+        if: always()
+        shell: bash
+        run: |
+          control_result=$(cat audit-results/control-result.txt 2>/dev/null || echo NOT_RUN)
+          target_assertion=$(cat audit-results/final-assertion.txt 2>/dev/null || echo NOT_VERIFIED)
+          if [[ "$control_result" != PASS || "$target_assertion" == NOT_VERIFIED ]]; then
+            echo 'At least one test did not compile, run, or reach its required final assertion.' >&2
+            exit 1
+          fi
+
+  f02-matrix-report:
+    name: Build combined Markdown, JSON, CSV and evidence hashes
+    if: always()
+    needs: [f02-history]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Download all per-revision artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: f02-history-*
+          path: all-cases
+          merge-multiple: false
+      - name: Build Spanish matrix and evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv, hashlib, json, pathlib
+
+          root=pathlib.Path('all-cases')
+          results=[]
+          for p in sorted(root.glob('**/result.json')):
+              try: results.append(json.loads(p.read_text()))
+              except Exception as e: results.append({'case_id':p.parent.name,'parse_error':str(e)})
+          results.sort(key=lambda r:r.get('case_id',''))
+          root.mkdir(exist_ok=True)
+          run_url=f"{__import__('os').environ.get('GITHUB_SERVER_URL','https://github.com')}/{__import__('os').environ.get('GITHUB_REPOSITORY','')}/actions/runs/{__import__('os').environ.get('GITHUB_RUN_ID','')}"
+          report={
+            'schema':'babylon-f02-history-matrix-v1',
+            'audit_branch':__import__('os').environ.get('GITHUB_REF_NAME','audit/f02-history-reconstruction'),
+            'audit_workflow_sha':__import__('os').environ.get('GITHUB_SHA'),
+            'workflow_run_url':run_url,
+            'current_upstream_main_as_of':'2026-10-10',
+            'current_upstream_main_sha':'c2f731f4531b2b22afe5047f152e108b944bf811',
+            'current_main_alias_of_case':'upstream-main-current-main-2026-10-10',
+            'cases':results,
+          }
+          (root/'f02-history-results.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+          columns=['case_id','tested_sha','tested_parent_sha','control_result','control_exit_code','control_before_expiry_state','control_before_expiry_persisted_power_sats','control_final_state','control_persisted_power_sats','f02_target_result','target_exit_code','final_assertion','after_expiry_before_quorum_state','after_expiry_before_quorum_power_sats','after_late_quorum_state','after_late_quorum_persisted_power_sats','historical_reference','evidence_type']
+          with (root/'f02-history-matrix.csv').open('w',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=columns); w.writeheader()
+              for r in results:
+                  o=r.get('observed',{}); c=r.get('control',{}); t=r.get('f02_target',{})
+                  w.writerow({'case_id':r.get('case_id'),'tested_sha':r.get('tested_sha'),'tested_parent_sha':r.get('tested_parent_sha'),'control_result':c.get('result'),'control_exit_code':c.get('exit_code'),'control_before_expiry_state':o.get('control_before_expiry_state'),'control_before_expiry_persisted_power_sats':o.get('control_before_expiry_persisted_power_sats'),'control_final_state':o.get('control_final_state'),'control_persisted_power_sats':o.get('control_persisted_power_sats'),'f02_target_result':t.get('result'),'target_exit_code':t.get('exit_code'),'final_assertion':t.get('final_assertion'),'after_expiry_before_quorum_state':o.get('after_expiry_before_quorum_state'),'after_expiry_before_quorum_power_sats':o.get('after_expiry_before_quorum_power_sats'),'after_late_quorum_state':o.get('after_late_quorum_state'),'after_late_quorum_persisted_power_sats':o.get('after_late_quorum_persisted_power_sats'),'historical_reference':r.get('historical_reference'),'evidence_type':r.get('evidence_type')})
+          lines=['# Matriz histórica F-02 de Babylon BTC Staking','',f'- Ejecución: {run_url}',f"- Commit del workflow: {report['audit_workflow_sha']}",f"- `main` verificado el 2026-10-10: `{report['current_upstream_main_sha']}` (el mismo SHA histórico; una sola ejecución evita duplicar coste)",'','Los códigos de salida se interpretan junto con las aserciones y el estado observado. Un resultado sin aserción final queda inconcluso.','']
+          for r in results:
+              o=r.get('observed',{}); c=r.get('control',{}); t=r.get('f02_target',{})
+              lines += [f"## {r.get('case_id','sin caso')}",f"- SHA probado: `{r.get('tested_sha','no disponible')}`",f"- Referencia: {r.get('historical_reference','no disponible')}",f"- Control: {c.get('result','NOT_RUN')} (código {c.get('exit_code','not-run')}); antes de expirar {o.get('control_before_expiry_state')} con {o.get('control_before_expiry_persisted_power_sats')} sats; al expirar {o.get('control_final_state')} con {o.get('control_persisted_power_sats')} sats",f"- F-02: {t.get('result','NOT_RUN')} (código {t.get('exit_code','not-run')}); aserción final: {t.get('final_assertion','NOT_VERIFIED')}",f"- Estado tras expiración sin quórum: {o.get('after_expiry_before_quorum_state')}; poder persistido: {o.get('after_expiry_before_quorum_power_sats')} sats",f"- Estado tras quórum tardío: {o.get('after_late_quorum_state')}; poder persistido: {o.get('after_late_quorum_persisted_power_sats')} sats",f"- Cache: `{o.get('finality_cache')}`",f"- Tabla de poder: `{o.get('finality_power_table')}`",'']
+          (root/'f02-history-matrix.md').write_text('\n'.join(lines)+'\n')
+          hashes=[]
+          for p in sorted(root.glob('**/*')):
+              if p.is_file() and p.name!='SHA256SUMS.txt': hashes.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}")
+          (root/'SHA256SUMS.txt').write_text('\n'.join(hashes)+'\n')
+          print('\n'.join(lines))
+          PY
+      - name: Upload combined audit evidence
+        if: always()
+        id: combined-artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: f02-history-complete
+          path: all-cases/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Record artifact link and workflow outcome
+        if: always()
+        shell: bash
+        run: |
+          echo "[Descargar el expediente completo (Markdown, JSON, CSV, logs y hashes)](${{ steps.combined-artifact.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+          echo 'El artefacto de ejecución contiene los registros por prueba y los resultados estructurados.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate that every required revision reached the final assertions
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          root = pathlib.Path('all-cases')
+          expected = {
+            'pr631-parent': 'cbc3a9a8c0c1e143f44f819dc145051dabf0f122',
+            'pr631-fix': '6d9b66816d33bd5bbb2abc9a55eb29324d836715',
+            'pr634-backport-parent': 'b68ef264564cfb01dd0d270076cec4055f3d1c6d',
+            'pr634-backport-fix': '1ebc3727fba1bf6231cb11d70554b12fa58d2342',
+            'v4.5.0': 'f9006e4232dece8050b08556c4617bc0aaa07128',
+            'upstream-main-current-main-2026-10-10': 'c2f731f4531b2b22afe5047f152e108b944bf811',
+          }
+          found = {}
+          for path in root.glob('f02-history-*/result.json'):
+              try:
+                  result = json.loads(path.read_text())
+                  found[result.get('case_id')] = result
+              except Exception as exc:
+                  print(f'Invalid result JSON at {path}: {exc}', file=sys.stderr)
+          errors = []
+          if set(found) != set(expected):
+              errors.append(f'Expected cases {sorted(expected)}, found {sorted(found)}')
+          for case_id, sha in expected.items():
+              result = found.get(case_id)
+              if not result:
+                  continue
+              if result.get('tested_sha') != sha:
+                  errors.append(f'{case_id}: wrong tested SHA {result.get("tested_sha")}')
+              if result.get('control', {}).get('result') != 'PASS' or result.get('control', {}).get('exit_code') != '0':
+                  errors.append(f'{case_id}: control did not pass')
+              target = result.get('f02_target', {})
+              if target.get('final_assertion') not in {'REACHED_AND_FAILED', 'REACHED_AND_PASSED'}:
+                  errors.append(f'{case_id}: target did not reach its final invariant')
+              observed = result.get('observed', {})
+              if observed.get('control_before_expiry_state') != 'ACTIVE' or observed.get('control_before_expiry_persisted_power_sats') != 2000000000:
+                  errors.append(f'{case_id}: control did not establish ACTIVE state with 2,000,000,000 sats')
+              if observed.get('control_final_state') != 'EXPIRED' or observed.get('control_persisted_power_sats') != 0:
+                  errors.append(f'{case_id}: control did not remove voting power at expiry')
+              if observed.get('after_expiry_before_quorum_state') != 'PENDING' or observed.get('after_expiry_before_quorum_power_sats') != 0:
+                  errors.append(f'{case_id}: unexpected or missing pre-quorum expiry observations')
+              if observed.get('expiry_event_no_quorum_assertion_seen') is not True:
+                  errors.append(f'{case_id}: the expired event was not verified as consumed without quorum')
+              if observed.get('late_quorum_event_and_state_assertion_seen') is not True:
+                  errors.append(f'{case_id}: the late-quorum activation event was not verified')
+              if observed.get('after_late_quorum_state') != 'EXPIRED' or observed.get('after_late_quorum_persisted_power_sats') is None:
+                  errors.append(f'{case_id}: missing or unexpected late-quorum state observation')
+              if observed.get('finality_cache') is None or observed.get('finality_power_table') is None:
+                  errors.append(f'{case_id}: missing final cache or voting-power table')
+              if target.get('final_assertion') == 'REACHED_AND_FAILED' and observed.get('after_late_quorum_persisted_power_sats', 0) <= 0:
+                  errors.append(f'{case_id}: failed invariant but no persisted power was captured')
+              if target.get('final_assertion') == 'REACHED_AND_PASSED' and observed.get('after_late_quorum_persisted_power_sats') != 0:
+                  errors.append(f'{case_id}: passed invariant but persisted power was nonzero')
+          if errors:
+              print('\n'.join(errors), file=sys.stderr)
+              raise SystemExit(1)
+          print(f'Validated all {len(expected)} exact revisions and required final observations.')
+          PY

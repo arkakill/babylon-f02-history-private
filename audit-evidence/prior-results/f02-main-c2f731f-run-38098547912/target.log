@@ -1,0 +1,30 @@
+=== RUN   TestF02LateQuorumAfterExpiryHasNoVotingPower
+    buffer.go:267: store.go:215: <nil> DBG loadVersion ver=0
+    buffer.go:267: store.go:253: <nil> DBG loadVersion commitID hash= key="KVStoreKey{0xc000b40640, btcstaking}" ver=0
+    buffer.go:267: store.go:72: <nil> INF Upgrading IAVL storage for faster queries + execution on live state. This may take a while commit=436F6D6D697449447B5B5D3A307D store_key="KVStoreKey{0xc000b40640, btcstaking}" version=1
+    buffer.go:267: store.go:86: <nil> DBG Finished loading IAVL tree
+    buffer.go:267: store.go:215: <nil> DBG loadVersion ver=0
+    buffer.go:267: store.go:253: <nil> DBG loadVersion commitID hash= key="KVStoreKey{0xc000b40640, btcstaking}" ver=0
+    buffer.go:267: store.go:86: <nil> DBG Finished loading IAVL tree
+    buffer.go:267: store.go:253: <nil> DBG loadVersion commitID hash= key="KVStoreKey{0xc000b41110, finality}" ver=0
+    buffer.go:267: store.go:86: <nil> DBG Finished loading IAVL tree
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03*\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\x06:@ <nil>:- 11-4 }#\n"
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03*\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\b:@ <nil>:- 6-3 }#\n"
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03*\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\n:@ <nil>:- 3-2 }#\n"
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03*\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\b:\"@ <nil>:- 1-0 }#\n"
+    f02_late_quorum_audit_test.go:196: after EXPIRED event without quorum: derived_state=PENDING BTC height=810 voting_power=0
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03+\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\x06:@ <nil>:- 13-5 }#\n"
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03+\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\x06:@ <nil>:- 8-4 }#\n"
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03+\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\n:@ <nil>:- 5-3 }#\n"
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03+\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\b:@ <nil>:- 3-2 }#\n"
+    buffer.go:267: mutable_tree.go:363: <nil> DBG recursiveRemove key="\b\x00\x00\x00\x00\x00\x00\x03+\x00\x00\x00\x00\x00\x00\x00\x00" node="Node{\b:\"@ <nil>:- 1-0 }#\n"
+    f02_late_quorum_audit_test.go:234: after late quorum: derived_state=EXPIRED BTC height=811 voting_power=2000000000 cache=total_voting_power:2000000000 finality_providers:<btc_pk:"\213\222\212\032\354?\226|hK&Hw\204\301\270~!fea]\016\352pX\030d\024\207N\330" addr:"<{h0s\231\217\263\261\377\2064B:\373x\n\\mN" commission:"270000000000000000" total_bonded_sat:2000000000 is_timestamped:true > num_active_fps:1  table=map[8b928a1aec3f967c684b26487784c1b87e216665615d0eea7058186414874ed8:2000000000]
+    f02_late_quorum_audit_test.go:239: 
+        	Error Trace:	/home/runner/work/babylon/babylon/x/finality/keeper/f02_late_quorum_audit_test.go:239
+        	Error:      	Should be zero, but was 2000000000
+        	Test:       	TestF02LateQuorumAfterExpiryHasNoVotingPower
+        	Messages:   	expired delegation regained voting power; cache=total_voting_power:2000000000 finality_providers:<btc_pk:"\213\222\212\032\354?\226|hK&Hw\204\301\270~!fea]\016\352pX\030d\024\207N\330" addr:"<{h0s\231\217\263\261\377\2064B:\373x\n\\mN" commission:"270000000000000000" total_bonded_sat:2000000000 is_timestamped:true > num_active_fps:1  table=map[8b928a1aec3f967c684b26487784c1b87e216665615d0eea7058186414874ed8:2000000000]
+--- FAIL: TestF02LateQuorumAfterExpiryHasNoVotingPower (0.03s)
+FAIL
+FAIL	github.com/babylonlabs-io/babylon/v4/x/finality/keeper	0.346s
+FAIL

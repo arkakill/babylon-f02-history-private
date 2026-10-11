@@ -1,0 +1,5 @@
+go1.25.8
+auto
+linux
+amd64
+1

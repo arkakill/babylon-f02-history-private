@@ -1,0 +1,125 @@
+{
+  "audit": "Babylon BTC Staking F-02 historical reconstruction",
+  "date": "2026-10-10",
+  "overall_historical_verdict": "NO_RESUELTO_HISTÓRICAMENTE",
+  "f02_reproduction_verdict": "CONFIRMADA en v4.5.0 y en el SHA de upstream main examinado",
+  "repositories": {
+    "personal_fork": "https://github.com/arkakill/babylon",
+    "official_upstream": "https://github.com/babylonlabs-io/babylon",
+    "intended_private_audit_repository": "https://github.com/arkakill/babylon-f02-history-private"
+  },
+  "versions": {
+    "release": "v4.5.0",
+    "release_sha": "f9006e4232dece8050b08556c4617bc0aaa07128",
+    "upstream_main_sha_verified_2026_10_10": "c2f731f4531b2b22afe5047f152e108b944bf811"
+  },
+  "candidate_fixes": [
+    {
+      "pull_request": 631,
+      "url": "https://github.com/babylonlabs-io/babylon/pull/631",
+      "parent_sha": "cbc3a9a8c0c1e143f44f819dc145051dabf0f122",
+      "fix_sha": "6d9b66816d33bd5bbb2abc9a55eb29324d836715",
+      "description": "ignore expire events when there is no covenant quorum"
+    },
+    {
+      "pull_request": 634,
+      "url": "https://github.com/babylonlabs-io/babylon/pull/634",
+      "parent_sha": "b68ef264564cfb01dd0d270076cec4055f3d1c6d",
+      "fix_sha": "1ebc3727fba1bf6231cb11d70554b12fa58d2342",
+      "description": "backport of PR #631 to release/v1.x"
+    }
+  ],
+  "tests": {
+    "control": "TestF02ControlQuorumBeforeExpiry",
+    "target": "TestF02LateQuorumAfterExpiryHasNoVotingPower",
+    "linux_commands": [
+      "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper",
+      "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper"
+    ],
+    "new_matrix_run": "NOT_STARTED",
+    "new_run_blocker": "GitHub authentication unavailable in the current local environment; gh is not on PATH and Git Credential Manager could not persist credentials to wincredman.",
+    "local_go_tests_executed": false,
+    "test_only_harness_adaptations": "Prepared in .github/workflows/f02-history-matrix.yml; actionlint passes. No production source or go.mod/go.sum changes."
+  },
+  "matrix": [
+    {
+      "sha": "cbc3a9a8c0c1e143f44f819dc145051dabf0f122",
+      "reference": "PR #631 parent",
+      "control": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "f02_test": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "final_state": null,
+      "persisted_voting_power_sats": null,
+      "historical_reference": "https://github.com/babylonlabs-io/babylon/pull/631",
+      "evidence_type": "Prior Actions job failed before final invariants due legacy test harness compatibility; corrected workflow has not run.",
+      "conclusion": "Not evaluated"
+    },
+    {
+      "sha": "6d9b66816d33bd5bbb2abc9a55eb29324d836715",
+      "reference": "PR #631 fix",
+      "control": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "f02_test": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "final_state": null,
+      "persisted_voting_power_sats": null,
+      "historical_reference": "https://github.com/babylonlabs-io/babylon/pull/631",
+      "evidence_type": "Prior Actions job failed before final invariants due legacy test harness compatibility; corrected workflow has not run.",
+      "conclusion": "Not evaluated"
+    },
+    {
+      "sha": "b68ef264564cfb01dd0d270076cec4055f3d1c6d",
+      "reference": "PR #634 backport parent",
+      "control": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "f02_test": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "final_state": null,
+      "persisted_voting_power_sats": null,
+      "historical_reference": "https://github.com/babylonlabs-io/babylon/pull/634",
+      "evidence_type": "Prior Actions job failed before final invariants due legacy test harness compatibility; corrected workflow has not run.",
+      "conclusion": "Not evaluated"
+    },
+    {
+      "sha": "1ebc3727fba1bf6231cb11d70554b12fa58d2342",
+      "reference": "PR #634 backport fix",
+      "control": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "f02_test": "INCONCLUSIVE_NOT_REACHED_IN_PRIOR_MATRIX",
+      "final_state": null,
+      "persisted_voting_power_sats": null,
+      "historical_reference": "https://github.com/babylonlabs-io/babylon/pull/634",
+      "evidence_type": "Prior Actions job failed before final invariants due legacy test harness compatibility; corrected workflow has not run.",
+      "conclusion": "Not evaluated"
+    },
+    {
+      "sha": "f9006e4232dece8050b08556c4617bc0aaa07128",
+      "reference": "Babylon v4.5.0",
+      "control": "PASS, prior Actions exit code 0",
+      "f02_test": "F02_REPRODUCED_AT_FINAL_INVARIANT, prior Actions exit code 1",
+      "final_state": "EXPIRED",
+      "persisted_voting_power_sats": 2000000000,
+      "historical_reference": "https://github.com/arkakill/babylon/actions/runs/38095710474",
+      "evidence_type": "Previously completed GitHub Actions integration test and archived report; this is not a new run in the pending matrix.",
+      "conclusion": "F-02 confirmed on this SHA"
+    },
+    {
+      "sha": "c2f731f4531b2b22afe5047f152e108b944bf811",
+      "reference": "Upstream main SHA verified 2026-10-10",
+      "control": "PASS, prior Actions exit code 0",
+      "f02_test": "F02_REPRODUCED_AT_FINAL_INVARIANT, prior Actions exit code 1",
+      "final_state": "EXPIRED",
+      "persisted_voting_power_sats": 2000000000,
+      "historical_reference": "https://github.com/arkakill/babylon/actions/runs/38098547912",
+      "evidence_type": "Previously completed GitHub Actions integration test with archived artifact and logs; this is not a new run in the pending matrix.",
+      "conclusion": "F-02 confirmed on this SHA"
+    }
+  ],
+  "prior_matrix_run": {
+    "url": "https://github.com/arkakill/babylon/actions/runs/38100558671",
+    "interpretation": "Four historical candidate jobs reported the final invariant was not verified; the global workflow success is not evidence of behavior on those SHAs. The v4.5.0 case reproduced F-02."
+  },
+  "historical_classification": "NO_RESUELTO_HISTÓRICAMENTE",
+  "reason": "No corrected run reached final assertions on the parent/fix pairs. Public PR descriptions identify related expiry/quorum changes but do not explicitly attribute them to the OpenZeppelin finding.",
+  "next_automated_step": "Restore GitHub authentication, verify/create the private audit repository, push only audit/f02-history-reconstruction, run the matrix on ubuntu-22.04, download full logs/artifacts, and update this matrix using only final assertions reached on exact SHAs.",
+  "limitations": [
+    "The corrected historical matrix has not executed.",
+    "No new GitHub Actions run URL, exit code, or artifact exists for the corrected workflow.",
+    "Exact attribution of the OpenZeppelin remediated issue to PR #631/#634 is not established by the public sources reviewed.",
+    "The prior F-02 tests use an integration harness and keeper state, not a full CometBFT node or disk-backed IAVL commit."
+  ]
+}

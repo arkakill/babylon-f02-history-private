@@ -1,0 +1,217 @@
+{
+  "audit": {
+    "title": "Auditoría comparativa Babylon BTC Staking: hipótesis F-02",
+    "hypothesis": "Una delegación Bitcoin podría recibir poder de voto después de expirar si el quórum covenant se completa tras consumirse el evento EXPIRED.",
+    "repositories": {
+      "personal_fork": "https://github.com/arkakill/babylon",
+      "official_upstream": "https://github.com/babylonlabs-io/babylon"
+    },
+    "source": {
+      "ref_type": "snapshot de main por SHA fijo; no es un tag de release",
+      "upstream_base_sha": "c2f731f4531b2b22afe5047f152e108b944bf811",
+      "upstream_base_commit_date": "2026-10-02",
+      "upstream_base_url": "https://github.com/babylonlabs-io/babylon/commit/c2f731f4531b2b22afe5047f152e108b944bf811",
+      "verified_by_final_workflow_artifact": true
+    },
+    "audit_branch": {
+      "name": "audit/f02-upstream-main-c2f731f",
+      "repository": "arkakill/babylon",
+      "tested_head_sha": "15aad2ae9c2aec1f3f1f1331200fab01a8043131",
+      "tested_head_url": "https://github.com/arkakill/babylon/commit/15aad2ae9c2aec1f3f1f1331200fab01a8043131",
+      "files_changed_from_upstream_base": [
+        ".github/workflows/f02-upstream-main-audit.yml",
+        "x/finality/keeper/f02_late_quorum_audit_test.go"
+      ],
+      "test_sha256": "6b961b5003cc9d348dd8e71aebcdb9829f6869cadcee670399fc0fb388bf6116",
+      "test_unchanged_from_v4_5_0": true,
+      "production_code_modified": false,
+      "go_mod_modified": false,
+      "go_sum_modified": false
+    },
+    "hypothesis_result": {
+      "confirmed_on_examined_commit": true,
+      "root_cause": [
+        "BTCDelegation.GetStatus checks covenant quorum before applying BTC expiration, so a no-quorum delegation can remain derived PENDING after its expiry event is consumed.",
+        "Late MsgServer.AddCovenantSigs creates an ACTIVE power-distribution event without rejecting the already-expired derived status.",
+        "The finality power-distribution handler applies ACTIVE without revalidating that the delegation is currently ACTIVE; the earlier EXPIRED event has already been consumed."
+      ],
+      "known_public_finding": "OpenZeppelin, State Changes at the Boundary, published 2026-04-01; same EXPIRED-to-ACTIVE event order and persistent voting-power impact.",
+      "duplicate_of_public_finding": true,
+      "historical_regression_demonstrated": false,
+      "historical_fix_commit_identified": false,
+      "verdict": "DUPLICADA/REGRESIÓN",
+      "verdict_detail": "Duplicada sustancial del hallazgo de OpenZeppelin y reproducida en el SHA examinado. No hay evidencia pública suficiente para afirmar regresión frente a una corrección concreta de Babylon."
+    },
+    "test_runtime": {
+      "executor": "GitHub Actions",
+      "runner": "ubuntu-22.04",
+      "go_version": "go1.25.8 linux/amd64",
+      "go_env": {
+        "GOVERSION": "go1.25.8",
+        "GOTOOLCHAIN": "auto",
+        "GOOS": "linux",
+        "GOARCH": "amd64",
+        "CGO_ENABLED": "1"
+      },
+      "tags": "cgo ledger test_ledger_mock norace",
+      "module_mode": "-mod=readonly"
+    },
+    "commands": [
+      {
+        "test": "TestF02ControlQuorumBeforeExpiry",
+        "command": "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper",
+        "exit_code": 0,
+        "result": "PASS"
+      },
+      {
+        "test": "TestF02LateQuorumAfterExpiryHasNoVotingPower",
+        "command": "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper",
+        "exit_code": 1,
+        "result": "FAIL_INVARIANT_REPRODUCED",
+        "failure": "The safety assertion expected zero voting power but observed 2000000000 sats. The test compiled and executed."
+      }
+    ],
+    "observations": {
+      "stake_sats": 2000000000,
+      "control": [
+        {
+          "scenario": "Quorum before expiry",
+          "babylon_height": 4,
+          "btc_height": 809,
+          "derived_delegation_state": "ACTIVE",
+          "cached_total_voting_power": 2000000000,
+          "num_active_finality_providers": 1,
+          "voting_power_table": {
+            "7a57f6e59130ca0a1d9d077ba3c83d7726037c02951a7620082b3a09da824030": 2000000000
+          }
+        },
+        {
+          "scenario": "Normal expiry after activation",
+          "babylon_height": 5,
+          "btc_height": 810,
+          "derived_delegation_state": "EXPIRED",
+          "voting_power": 0,
+          "cache": "absent because empty protobuf distribution serializes to no bytes",
+          "voting_power_table": {}
+        }
+      ],
+      "late_quorum_target": [
+        {
+          "scenario": "EXPIRED processed without quorum; event consumed",
+          "babylon_height": 4,
+          "btc_height": 810,
+          "derived_delegation_state": "PENDING",
+          "voting_power": 0,
+          "power_update_events_remaining_at_expiry_height": 0,
+          "cache": "empty/absent",
+          "voting_power_table": {}
+        },
+        {
+          "scenario": "Quorum submitted after expiry through MsgServer; ACTIVE event queued",
+          "babylon_height": 5,
+          "btc_height": 811,
+          "derived_delegation_state": "EXPIRED",
+          "voting_power_before_next_begin_block": 0,
+          "new_event_state": "ACTIVE"
+        },
+        {
+          "scenario": "Late ACTIVE event applied by BeginBlocker",
+          "babylon_height": 6,
+          "btc_height": 811,
+          "derived_delegation_state": "EXPIRED",
+          "voting_power": 2000000000,
+          "cache_total_voting_power": 2000000000,
+          "cache_num_active_fps": 1,
+          "cache_finality_provider_count": 1,
+          "cache_finality_provider_total_bonded_sat": 2000000000,
+          "cache_finality_provider_is_timestamped": true,
+          "voting_power_table": {
+            "8b928a1aec3f967c684b26487784c1b87e216665615d0eea7058186414874ed8": 2000000000
+          }
+        }
+      ]
+    },
+    "github_actions": {
+      "workflow_path": ".github/workflows/f02-upstream-main-audit.yml",
+      "runner": "ubuntu-22.04",
+      "artifact_retention_days": 90,
+      "final_run": {
+        "run_id": "38098547912",
+        "url": "https://github.com/arkakill/babylon/actions/runs/38098547912",
+        "audit_commit": "15aad2ae9c2aec1f3f1f1331200fab01a8043131",
+        "upstream_base_sha": "c2f731f4531b2b22afe5047f152e108b944bf811",
+        "run_duration": "4m35s",
+        "overall_status": "failure because target test correctly failed its zero-power security invariant",
+        "control_exit_code": 0,
+        "target_exit_code": 1,
+        "artifact_id": "11686192976",
+        "artifact_name": "f02-main-c2f731f-audit-results",
+        "artifact_github_sha256": "5c591b088ee86944a95e34c47d49e4fdb5f086350c1e2631bdbe61c67ac2f71d",
+        "artifact_local_sha256_verified": true,
+        "local_zip": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\f02-main-c2f731f-run-38098547912.zip",
+        "extracted_logs_directory": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\f02-main-c2f731f-run-38098547912"
+      },
+      "initial_run": {
+        "run_id": "38098321795",
+        "url": "https://github.com/arkakill/babylon/actions/runs/38098321795",
+        "audit_commit": "8c4bbed8fd2bf282af6abd7dd3b62b5aa18794f7",
+        "duration": "4m27s",
+        "control_exit_code": 0,
+        "target_exit_code": 1,
+        "base_sha_metadata": "empty because checkout was shallow",
+        "artifact_local_sha256": "be708ffe6e48e4f3586c3409cd5afda447316d61489ec195a8a876dbd471cd7b",
+        "local_zip": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\f02-main-c2f731f-run-38098321795.zip",
+        "interpretation": "Behavioral result reproduced, but final run 38098547912 is authoritative for exact upstream base evidence."
+      }
+    },
+    "historical_comparison": [
+      {
+        "name": "OpenZeppelin: State Changes at the Boundary",
+        "date": "2026-04-01",
+        "url": "https://www.openzeppelin.com/news/state-changes-at-the-boundary-lessons-from-security-research-on-babylon",
+        "relation": "Same event ordering and persistent voting-power consequence; duplicate finding. Babylon confirmed findings according to the publication, but the exact corrective SHA/release is not identified there."
+      },
+      {
+        "name": "Babylon PR #631: ignore expire events when there is no covenant quorum",
+        "merged": "2025-03-05",
+        "url": "https://github.com/babylonlabs-io/babylon/pull/631",
+        "related_commit": "6d9b668",
+        "relation": "Addresses expiry without an existing covenant quorum; does not prevent a later quorum from creating ACTIVE after EXPIRED was consumed."
+      },
+      {
+        "name": "Babylon PR #1404: refactor power distribution event processing",
+        "merged": "2025-07-25",
+        "url": "https://github.com/babylonlabs-io/babylon/pull/1404",
+        "related_merge_commit": "08f0beb",
+        "relation": "Refactor and same-block ACTIVE/EXPIRED coverage; not an identified fix for the cross-block late-quorum sequence."
+      },
+      {
+        "name": "Babylon v4.5.0 comparison",
+        "base_sha": "f9006e4232dece8050b08556c4617bc0aaa07128",
+        "actions_run": "https://github.com/arkakill/babylon/actions/runs/38095710474",
+        "relation": "Same test SHA and same 2,000,000,000-sat reproduction. Confirms F-02 was already present in v4.5.0; does not prove whether an intervening fix was later reverted."
+      }
+    ],
+    "evidence_files": {
+      "report_markdown": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\F02-auditoria-Babylon-upstream-main-c2f731f.md",
+      "results_json": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\F02-auditoria-Babylon-upstream-main-c2f731f.json",
+      "final_artifact_zip": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\f02-main-c2f731f-run-38098547912.zip",
+      "control_log": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\f02-main-c2f731f-run-38098547912\\control.log",
+      "target_log": "C:\\Users\\eliga\\Documents\\Codex\\2026-10-10\\como\\outputs\\f02-main-c2f731f-run-38098547912\\target.log"
+    },
+    "limitations": [
+      "The test harness uses actual keeper BeginBlocker, message server, event store, and KV voting-power cache/table; the Bitcoin light-client/checkpoint inputs and finality hooks are mocked fixtures.",
+      "The integration test verifies keeper KV storage in the test application, but does not run a CometBFT node or a disk-backed IAVL commit.",
+      "Tests ran on hosted GitHub Actions Linux; no full build or mass tests were run locally on Windows.",
+      "No public commit/release explicitly tied to the OpenZeppelin F-02 correction was identified, so regression versus that fix remains unresolved.",
+      "No real Bitcoin network, testnet, mainnet, transaction, private key, credentials, or funds were used."
+    ],
+    "confidence": {
+      "reproduction_on_c2f731f": "high",
+      "duplicate_of_openzeppelin_finding": "high",
+      "identification_of_exact_upstream_fix": "low; no public mapping found",
+      "historical_regression_classification": "not demonstrated"
+    },
+    "next_step_automated": "Identify the exact public commit/release Babylon associates with F-02/OpenZeppelin, then run the unchanged control and target tests against that commit, its parent, and the first release after it to distinguish an incomplete fix from a regression."
+  }
+}
