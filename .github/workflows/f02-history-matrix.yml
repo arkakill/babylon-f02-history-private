@@ -119,9 +119,11 @@ jobs:
                   '\thooks.EXPECT().AfterBbnFpRemovedFromActiveSet(gomock.Any(), gomock.Any()).AnyTimes()\n'
               )
               replace_once(hooks, '', 'remove finality-hooks expectations absent from the PR #1404 helper')
+              replace_once('h := testutil.NewHelper(t, btclcKeeper, btccKeeper, nil)', 'h := testutil.NewHelper(t, btclcKeeper, btccKeeper)', 'adapt PR #1404 NewHelper signature')
+              replace_once('\t\tfpPK,\n', '\t\t[]*btcec.PublicKey{fpPK},\n', 'adapt PR #1404 helper to its provider-slice argument')
               path.write_text(text)
               Path('audit-results/test-adaptation.txt').write_text(
-                  'PR #1404 v3-module compatibility adaptations only; test sequence and assertions are unchanged.\n'
+                  'PR #1404 historical-harness compatibility adaptations only; the one-provider fixture, test sequence and assertions are unchanged.\n'
                   + ''.join(f'- {item}\n' for item in changes)
               )
               raise SystemExit(0)
