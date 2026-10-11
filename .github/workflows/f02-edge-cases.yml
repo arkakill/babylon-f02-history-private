@@ -27,7 +27,7 @@ jobs:
           repository: babylonlabs-io/babylon
           ref: c2f731f4531b2b22afe5047f152e108b944bf811
           path: tested
-          fetch-depth: 1
+          fetch-depth: 2
       - name: Use Go version declared by tested revision
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:

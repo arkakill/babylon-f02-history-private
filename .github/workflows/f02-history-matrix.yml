@@ -40,6 +40,12 @@ jobs:
           - case_id: upstream-main-current-main-2026-10-10
             reference: https://github.com/babylonlabs-io/babylon/commit/c2f731f4531b2b22afe5047f152e108b944bf811
             sha: c2f731f4531b2b22afe5047f152e108b944bf811
+          - case_id: pr1404-parent
+            reference: https://github.com/babylonlabs-io/babylon/pull/1404
+            sha: f6d750ee856c2896c5314bf21d3f286726077480
+          - case_id: pr1404-refactor-merge
+            reference: https://github.com/babylonlabs-io/babylon/pull/1404
+            sha: 08f0beb574b1745ad6f260345e645154c2a5db89
     steps:
       - name: Checkout private audit test source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -54,7 +60,7 @@ jobs:
           repository: babylonlabs-io/babylon
           ref: ${{ matrix.sha }}
           path: tested
-          fetch-depth: 1
+          fetch-depth: 2
       - name: Use Go version declared by tested revision
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -103,6 +109,22 @@ jobs:
               raise SystemExit('Expected at least one Babylon v4 import path to adapt')
           text = text.replace(module_prefix, os.environ['TARGET_MODULE'])
           changes.append(f'adapt module import path ({module_count} references)')
+          if os.environ['CASE_ID'].startswith('pr1404-'):
+              replace_once('\tftypes "github.com/babylonlabs-io/babylon/v3/x/finality/types"\n', '', 'drop finality-hooks import absent from the PR #1404 helper')
+              hooks = (
+                  '\thooks := h.FinalityHooks.(*ftypes.MockFinalityHooks)\n'
+                  '\thooks.EXPECT().AfterBtcDelegationActivated(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()\n'
+                  '\thooks.EXPECT().AfterBtcDelegationUnbonded(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()\n'
+                  '\thooks.EXPECT().AfterBbnFpEntersActiveSet(gomock.Any(), gomock.Any()).AnyTimes()\n'
+                  '\thooks.EXPECT().AfterBbnFpRemovedFromActiveSet(gomock.Any(), gomock.Any()).AnyTimes()\n'
+              )
+              replace_once(hooks, '', 'remove finality-hooks expectations absent from the PR #1404 helper')
+              path.write_text(text)
+              Path('audit-results/test-adaptation.txt').write_text(
+                  'PR #1404 v3-module compatibility adaptations only; test sequence and assertions are unchanged.\n'
+                  + ''.join(f'- {item}\n' for item in changes)
+              )
+              raise SystemExit(0)
           replace_once('\tftypes "github.com/babylonlabs-io/babylon/x/finality/types"\n', '', 'drop absent legacy finality-hooks mock import')
           replace_once('h := testutil.NewHelper(t, btclcKeeper, btccKeeper, nil)', 'h := testutil.NewHelper(t, btclcKeeper, btccKeeper)', 'adapt legacy NewHelper signature')
           hooks = (
@@ -359,6 +381,8 @@ jobs:
             'pr634-backport-fix': '1ebc3727fba1bf6231cb11d70554b12fa58d2342',
             'v4.5.0': 'f9006e4232dece8050b08556c4617bc0aaa07128',
             'upstream-main-current-main-2026-10-10': 'c2f731f4531b2b22afe5047f152e108b944bf811',
+            'pr1404-parent': 'f6d750ee856c2896c5314bf21d3f286726077480',
+            'pr1404-refactor-merge': '08f0beb574b1745ad6f260345e645154c2a5db89',
           }
           found = {}
           for path in root.glob('f02-history-*/result.json'):
