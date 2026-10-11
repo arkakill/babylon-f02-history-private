@@ -170,12 +170,17 @@ func TestF02ControlQuorumBeforeExpiry(t *testing.T) {
 		f.h.FinalityKeeper.GetVotingPowerDistCache(f.h.Ctx, 4).String(),
 		f.h.FinalityKeeper.GetVotingPowerTable(f.h.Ctx, 4))
 
-	f.beginBlock(5, expiringHeight)
-	require.Equal(t, btcstktypes.BTCDelegationStatus_EXPIRED, f.derivedStatus(t, expiringHeight))
+	// Historical revisions define expiry with a strict `>` comparison against
+	// EndHeight, so at expiringHeight the derived status can still be ACTIVE.
+	// Advance one BTC block beyond the event threshold to make this control's
+	// terminal-expiry assertion valid across both the historical and current
+	// boundary semantics.
+	f.beginBlock(5, expiringHeight+1)
+	require.Equal(t, btcstktypes.BTCDelegationStatus_EXPIRED, f.derivedStatus(t, expiringHeight+1))
 	f.assertPersistedPower(t, 5, 0)
 	require.Empty(t, f.h.BTCStakingKeeper.GetAllPowerDistUpdateEvents(f.h.Ctx, expiringHeight, expiringHeight))
 	t.Logf("control after expiry: state=%s BTC height=%d voting_power=0 cache=%s table=%v",
-		f.derivedStatus(t, expiringHeight), expiringHeight,
+		f.derivedStatus(t, expiringHeight+1), expiringHeight+1,
 		f.cacheSummary(5),
 		f.h.FinalityKeeper.GetVotingPowerTable(f.h.Ctx, 5))
 }
