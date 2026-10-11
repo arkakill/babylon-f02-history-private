@@ -1,0 +1,113 @@
+name: F-02 boundary and event-order integration cases
+
+on:
+  push:
+    branches:
+      - audit/f02-history-reconstruction
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  edge-cases:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout private audit test source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: audit-source
+          fetch-depth: 1
+      - name: Checkout exact upstream main snapshot
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: babylonlabs-io/babylon
+          ref: c2f731f4531b2b22afe5047f152e108b944bf811
+          path: tested
+          fetch-depth: 1
+      - name: Use Go version declared by tested revision
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: tested/go.mod
+          cache: true
+          cache-dependency-path: tested/go.sum
+      - name: Record exact source and copy test-only files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit-results
+          git -C audit-source rev-parse HEAD > audit-results/audit-source-commit.sha
+          git -C tested rev-parse HEAD > audit-results/tested-commit.sha
+          test "$(cat audit-results/tested-commit.sha)" = 'c2f731f4531b2b22afe5047f152e108b944bf811'
+          git -C tested show -s --format='%P' > audit-results/tested-parent.sha
+          go version > audit-results/go-version.txt
+          go env GOVERSION GOTOOLCHAIN GOOS GOARCH CGO_ENABLED > audit-results/go-env.txt
+          cp audit-source/x/finality/keeper/f02_late_quorum_audit_test.go tested/x/finality/keeper/
+          cp audit-source/x/finality/keeper/f02_edge_audit_test.go tested/x/finality/keeper/
+          sha256sum audit-source/x/finality/keeper/f02_late_quorum_audit_test.go audit-source/x/finality/keeper/f02_edge_audit_test.go > audit-results/test-source.sha256
+          git -C tested status --short > audit-results/test-only-working-tree.txt
+          printf '%s\n' "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper" > audit-results/control-command.txt
+          printf '%s\n' "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper" > audit-results/target-command.txt
+          printf '%s\n' "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02(QuorumAtExpirySameHeightLeavesNoVotingPower|ActiveAtEminus1AndExpiryAtEProcessedInCatchup)$' ./x/finality/keeper" > audit-results/edge-command.txt
+          printf '%s\n' "go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestActiveAndExpiredEventsSameBlock$' ./x/btcstaking/keeper" > audit-results/pr1404-command.txt
+      - name: Run control, target, and boundary tests separately
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02ControlQuorumBeforeExpiry$' ./x/finality/keeper) > audit-results/control.stdout.log 2> audit-results/control.stderr.log
+          printf '%s\n' "$?" > audit-results/control.exit-code
+          (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02LateQuorumAfterExpiryHasNoVotingPower$' ./x/finality/keeper) > audit-results/target.stdout.log 2> audit-results/target.stderr.log
+          printf '%s\n' "$?" > audit-results/target.exit-code
+          (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestF02(QuorumAtExpirySameHeightLeavesNoVotingPower|ActiveAtEminus1AndExpiryAtEProcessedInCatchup)$' ./x/finality/keeper) > audit-results/edge.stdout.log 2> audit-results/edge.stderr.log
+          printf '%s\n' "$?" > audit-results/edge.exit-code
+          (cd tested && go test -mod=readonly -tags='cgo ledger test_ledger_mock norace' -count=1 -v -run '^TestActiveAndExpiredEventsSameBlock$' ./x/btcstaking/keeper) > audit-results/pr1404.stdout.log 2> audit-results/pr1404.stderr.log
+          printf '%s\n' "$?" > audit-results/pr1404.exit-code
+          for case in control target edge pr1404; do
+            { printf '%s\n' '--- STDOUT ---'; cat "audit-results/$case.stdout.log"; printf '%s\n' '--- STDERR ---'; cat "audit-results/$case.stderr.log"; } > "audit-results/$case.log"
+          done
+          python3 - <<'PY'
+          import hashlib, json, pathlib, re
+          d=pathlib.Path('audit-results')
+          read=lambda n: (d/n).read_text(errors='replace').strip()
+          target=read('target.log'); edge=read('edge.log')
+          late=re.search(r'after late quorum: derived_state=([^ ]+).*?voting_power=(\d+).*?cache=(.*?) table=(.*)', target)
+          result={
+            'tested_sha':read('tested-commit.sha'),
+            'tested_parent_sha':read('tested-parent.sha'),
+            'audit_source_sha':read('audit-source-commit.sha'),
+            'go_version':read('go-version.txt'),
+            'go_environment':read('go-env.txt'),
+            'control':{'exit_code':int(read('control.exit-code')),'result':'PASS' if int(read('control.exit-code'))==0 else 'FAIL','command':read('control-command.txt')},
+            'f02_target':{'exit_code':int(read('target.exit-code')),'result':'REPRODUCED' if 'expired delegation regained voting power' in target and late else 'NOT_CONFIRMED','final_assertion':'REACHED_AND_FAILED' if 'expired delegation regained voting power' in target and late else 'NOT_VERIFIED','command':read('target-command.txt')},
+            'edge_cases':{'exit_code':int(read('edge.exit-code')),'result':'PASS' if int(read('edge.exit-code'))==0 else 'FAIL','command':read('edge-command.txt'),'same_height_test_passed':'--- PASS: TestF02QuorumAtExpirySameHeightLeavesNoVotingPower' in edge,'catchup_replay_test_passed':'--- PASS: TestF02ActiveAtEminus1AndExpiryAtEProcessedInCatchup' in edge},
+            'pr1404_existing_test':{'exit_code':int(read('pr1404.exit-code')),'result':'PASS' if int(read('pr1404.exit-code'))==0 else 'FAIL','command':read('pr1404-command.txt'),'test_passed':'--- PASS: TestActiveAndExpiredEventsSameBlock' in read('pr1404.log')},
+            'observed_late_quorum':{'derived_state':late.group(1) if late else None,'persisted_power_sats':int(late.group(2)) if late else None,'cache':late.group(3) if late else None,'power_table':late.group(4) if late else None},
+            'test_source_sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [pathlib.Path('tested/x/finality/keeper/f02_late_quorum_audit_test.go'),pathlib.Path('tested/x/finality/keeper/f02_edge_audit_test.go')]},
+            'evidence_type':'GitHub Actions Linux keeper integration tests; raw stdout/stderr/logs and exit codes attached'
+          }
+          (d/'result.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Preserve logs and structured results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: f02-edge-cases-${{ github.sha }}
+          path: audit-results/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Require valid controls and passing boundary tests; expect F-02 assertion to reproduce
+        if: always()
+        shell: bash
+        run: |
+          test "$(cat audit-results/control.exit-code)" = 0
+          test "$(cat audit-results/edge.exit-code)" = 0
+          test "$(cat audit-results/pr1404.exit-code)" = 0
+          grep -Fq -- '--- PASS: TestActiveAndExpiredEventsSameBlock' audit-results/pr1404.log
+          test "$(cat audit-results/target.exit-code)" = 1
+          grep -Fq 'expired delegation regained voting power' audit-results/target.log
+          grep -Fq 'after late quorum: derived_state=EXPIRED' audit-results/target.log
+          grep -Fq 'voting_power=2000000000' audit-results/target.log
